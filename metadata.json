@@ -1,0 +1,6 @@
+{
+  "name": "PixelTune",
+  "description": "A minimalist local music player featuring a pixel art clock, wave visualizer, and flat modern UI controls. No ads or login required.",
+  "requestFramePermissions": [],
+  "majorCapabilities": []
+}
