@@ -28,6 +28,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   audioSeek: (sec) => ipcRenderer.invoke('audio:seek', sec),
   audioSetVolume: (vol) => ipcRenderer.invoke('audio:setVolume', vol),
   audioGetVolume: () => ipcRenderer.invoke('audio:getVolume'),
+  audioGetState: () => ipcRenderer.invoke('audio:getState'),
+  audioGetState: () => ipcRenderer.invoke('audio:getState'),
 
   // Tags & Lyrics
   readTags: (filePath) => ipcRenderer.invoke('tag:read', filePath),
