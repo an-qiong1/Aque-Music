@@ -1,0 +1,115 @@
+{
+  "name": "aque-music",
+  "version": "1.0.0",
+  "description": "AQUE Player - Windows Local Music Player",
+  "main": "src/main/index.js",
+  "scripts": {
+    "start": "electron .",
+    "dev": "electron .",
+    "build": "electron-builder build --win",
+    "build:portable": "electron-builder build --win portable",
+    "build:dir": "electron-builder build --win dir",
+    "build:check": "node scripts/build-check.js"
+  },
+  "build": {
+    "appId": "com.aque.music-player",
+    "productName": "AQUE Player",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "src/**/*",
+      "phosphor/*",
+      "assets/**/*"
+    ],
+    "extraResources": [
+      {
+        "from": "BASS",
+        "to": "BASS",
+        "filter": [
+          "*.dll"
+        ]
+      }
+    ],
+    "win": {
+      "icon": "assets/icons/app-icon.ico",
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "signAndEditExecutable": false
+    },
+    "fileAssociations": {
+      "ext": [
+        "mp3",
+        "flac",
+        "wav",
+        "ogg",
+        "aac",
+        "m4a",
+        "wma",
+        "opus",
+        "ape",
+        "aif",
+        "aiff",
+        "dsf",
+        "dff",
+        "wv",
+        "mpc",
+        "mid",
+        "midi"
+      ],
+      "name": "AQUE Player",
+      "description": "AQUE Player 支持的音频文件",
+      "icon": "assets/icons/app-icon.ico"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "shortcutName": "AQUE Player",
+      "installerIcon": "assets/icons/app-icon.ico",
+      "uninstallerIcon": "assets/icons/app-icon.ico",
+      "installerHeaderIcon": "assets/icons/app-icon.ico"
+    },
+    "asarUnpack": [
+      "node_modules/koffi/**"
+    ]
+  },
+  "keywords": [
+    "music",
+    "player",
+    "audio"
+  ],
+  "author": "",
+  "license": "MIT",
+  "type": "commonjs",
+  "devDependencies": {
+    "autoprefixer": "^10.5.0",
+    "electron": "^24.0.0",
+    "electron-builder": "^25.0.0",
+    "postcss": "^8.5.14",
+    "sharp": "^0.34.5",
+    "tailwindcss": "^3.4.19"
+  },
+  "dependencies": {
+    "@phosphor-icons/web": "^2.1.1",
+    "7zip-bin": "^5.2.0",
+    "axios": "^1.16.1",
+    "chokidar": "^3.6.0",
+    "iconv-lite": "^0.7.2",
+    "koffi": "2.16.2",
+    "music-metadata": "^7.14.0",
+    "ws": "^8.21.0"
+  }
+}
