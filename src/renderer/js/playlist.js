@@ -534,28 +534,32 @@ AQUE.Playlist = {
   },
 
   _onClear() {
-    // 清空所有专辑的全部曲目
-    let total = 0;
-    for (const album of AQUE.State.albums) {
-      total += album.tracks.length;
-      album.tracks.length = 0;
+    try {
+      // 清空所有专辑的全部曲目
+      let total = 0;
+      for (const album of AQUE.State.albums) {
+        total += album.tracks.length;
+        album.tracks.length = 0;
+      }
+      if (total === 0) return;
+      AQUE.Player._trackMetaCache.clear();
+      AQUE.Player.resetShuffleQueue();
+      AQUE.Player.clearHistory();
+      if (AQUE.API.isElectron) AQUE.API.audioStop();
+      AQUE.State.setCurrentPlayingIndex(-1);
+      AQUE.State.currentLyrics = [];
+      AQUE.State.lastLyricIdx = -1;
+      AQUE.Player.setTrackInfo('准备就绪', '载入音频文件开始播放');
+      const bottomTimecode = document.getElementById('bottom-timecode');
+      if (bottomTimecode) bottomTimecode.innerText = '0:00';
+      document.getElementById('duration-timer').innerText = '0:00';
+      this._renderList();
+      this._save();
+      AQUE.Lyrics.render();
+      AQUE.Utils.showToast('列表已清空', 1200);
+    } catch (e) {
+      console.error('[Playlist] _onClear error:', e);
     }
-    if (total === 0) return;
-    AQUE.Player._trackMetaCache.clear();
-    AQUE.Player.resetShuffleQueue();
-    AQUE.Player.clearHistory();
-    if (AQUE.API.isElectron) AQUE.API.audioStop();
-    AQUE.State.setCurrentPlayingIndex(-1);
-    AQUE.State.currentLyrics = [];
-    AQUE.State.lastLyricIdx = -1;
-    AQUE.Player.setTrackInfo('准备就绪', '载入音频文件开始播放');
-    const bottomTimecode = document.getElementById('bottom-timecode');
-    if (bottomTimecode) bottomTimecode.innerText = '0:00';
-    document.getElementById('duration-timer').innerText = '0:00';
-    this._renderList();
-    this._save();
-    AQUE.Lyrics.render();
-    AQUE.Utils.showToast('列表已清空', 1200);
   },
 
   _onCreateAlbum() {
