@@ -17,16 +17,16 @@
       <!-- Titlebar -->
       <div class="win-titlebar" id="titlebar">
       <div class="flex items-center gap-2">
-        <i class="ph ph-vinyl-record text-gray-500"></i>
-        <span class="text-[10px] text-gray-500 font-bold tracking-tight">AQUE PLAYER PRO</span>
+        <i class="ph ph-vinyl-record text-[#b3b3b3]"></i>
+        <span class="text-[10px] text-[#b3b3b3] font-bold tracking-tight">AQUE PLAYER PRO</span>
       </div>
       <div class="win-controls flex h-full">
         <button id="pin-btn" aria-label="置顶窗口" title="置顶窗口" class="w-10 hover:bg-white/10 transition-colors flex items-center justify-center">
-          <i class="ph ph-push-pin text-xs text-gray-500" id="pin-icon"></i>
+          <i class="ph ph-push-pin text-xs text-[#b3b3b3]" id="pin-icon"></i>
         </button>
-        <button id="min-btn" aria-label="最小化" title="最小化" class="w-10 hover:bg-white/10 flex items-center justify-center"><i class="ph ph-minus text-xs text-gray-500"></i></button>
+        <button id="min-btn" aria-label="最小化" title="最小化" class="w-10 hover:bg-white/10 flex items-center justify-center"><i class="ph ph-minus text-xs text-[#b3b3b3]"></i></button>
         
-        <button id="close-btn" aria-label="关闭到托盘" title="关闭到托盘" class="w-10 hover:bg-red-600 group flex items-center justify-center"><i class="ph ph-x text-xs text-gray-500 group-hover:text-white"></i></button>
+        <button id="close-btn" aria-label="关闭到托盘" title="关闭到托盘" class="w-10 hover:bg-[#f3727f] group flex items-center justify-center"><i class="ph ph-x text-xs text-[#b3b3b3] group-hover:text-white"></i></button>
       </div>
     </div>
 
@@ -34,17 +34,17 @@
 
     <!-- Playlist Overlay -->
     <div class="playlist-overlay" id="playlist-overlay">
-      <div class="album-tabs flex bg-black border-b border-[#1a1a1a] overflow-x-auto no-scrollbar" id="album-tabs"></div>
-      <div class="flex-1 overflow-y-auto no-scrollbar bg-[#0f0f0f]" id="playlist-content"></div>
+      <div class="album-tabs flex bg-[#121212] border-b border-[#282828] overflow-x-auto no-scrollbar" id="album-tabs"></div>
+      <div class="flex-1 overflow-y-auto no-scrollbar bg-[#121212]" id="playlist-content"></div>
       <div class="playlist-toolbar px-4">
-        <button class="px-3 py-1 bg-[#1a1a1a] text-[10px] text-gray-400 rounded border border-[#2a2a2a]" id="add-btn">添加</button>
-        <button class="px-3 py-1 bg-[#1a3a2a] text-[10px] text-emerald-400 rounded border border-emerald-700/30" id="add-folder-btn">文件夹</button>
-        <button class="px-3 py-1 bg-red-950/30 text-[10px] text-red-400 rounded border border-red-900/30" id="clear-list-btn">清空</button>
+        <button class="bg-[#1f1f1f] text-white border border-[#4d4d4d]" id="add-btn">添加</button>
+        <button class="bg-[#1a3a2a] text-[#1ed760] border border-[#1ed760]/30" id="add-folder-btn">文件夹</button>
+        <button class="bg-red-950/30 text-[#f3727f] border border-[#f3727f]/30" id="clear-list-btn">清空</button>
         <div class="search-box">
           <input type="text" id="search-input" placeholder="搜索音频...">
-          <i class="ph ph-magnifying-glass text-[#444] text-xs"></i>
+          <i class="ph ph-magnifying-glass text-[#b3b3b3] text-xs"></i>
         </div>
-        <button id="close-playlist" class="text-gray-500 hover:text-white ml-2"><i class="ph ph-caret-down text-xl"></i></button>
+        <button id="close-playlist" class="text-[#b3b3b3] hover:text-white ml-2"><i class="ph ph-caret-down text-xl"></i></button>
       </div>
     </div>
 
@@ -56,12 +56,12 @@
           <div class="flex flex-col">
             <h1 class="glow-dot-text text-xl">A Q U E</h1>
             <div class="flex items-center gap-1.5 mt-1">
-              <div class="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-pulse shadow-[0_0_8px_#10b981]"></div>
-              <span class="text-[9px] text-emerald-500 font-black tracking-widest uppercase">On Air</span>
+              <div class="w-1.5 h-1.5 bg-[#1ed760] rounded-full animate-pulse shadow-[0_0_8px_#1ed760]"></div>
+              <span class="text-[9px] text-[#1ed760] font-black tracking-widest uppercase">On Air</span>
             </div>
           </div>
           <div class="top-meta">
-            <div class="text-xl font-mono" id="system-clock">00:00</div>
+            <div class="text-xl font-mono text-[#b3b3b3]" id="system-clock">00:00</div>
             <div class="track-meta-on-dark">
               <span id="track-format">LOCAL</span>
               <span id="track-quality">等待音频信息</span>
@@ -72,18 +72,18 @@
       </div>
 
       <!-- Bottom Card -->
-      <div class="bg-white flex-1 flex flex-col px-8 pt-8 pb-6 shadow-2xl relative z-10 -mt-2 rounded-t-[40px] overflow-hidden">
+      <div class="spotify-card flex-1 flex flex-col px-8 pt-8 pb-4 relative z-10 -mt-2 rounded-t-[8px]">
         <!-- Song Info inside White Card -->
         <div class="mb-4 flex-shrink-0 flex items-center gap-6">
-          <div class="album-cover-wrapper w-16 h-16 rounded-xl overflow-hidden shadow-lg bg-gray-100 flex-shrink-0">
+          <div class="album-cover-wrapper w-16 h-16 overflow-hidden flex-shrink-0">
             <img id="album-cover" src="" alt="Album Cover" class="w-full h-full object-cover" />
-            <div id="cover-placeholder" class="w-full h-full flex items-center justify-center bg-gradient-to-br from-gray-100 to-gray-200">
-              <i class="ph ph-music-notes text-gray-400 text-2xl"></i>
+            <div id="cover-placeholder" class="w-full h-full flex items-center justify-center bg-gradient-to-br from-[#282828] to-[#1f1f1f]">
+              <i class="ph ph-music-notes text-[#b3b3b3] text-2xl"></i>
             </div>
           </div>
           <div class="flex-1 min-w-0">
-            <h2 id="song-title" class="text-black text-2xl font-black truncate">准备就绪</h2>
-            <p id="song-artist" class="text-gray-400 text-[10px] font-bold uppercase tracking-widest mt-1">载入音频文件开始播放</p>
+            <h2 id="song-title" class="text-white text-2xl font-black truncate">准备就绪</h2>
+            <p id="song-artist" class="text-[#b3b3b3] text-[10px] font-bold uppercase tracking-widest mt-1">载入音频文件开始播放</p>
           </div>
         </div>
 
@@ -93,23 +93,23 @@
 
         <div id="player-controls" class="mt-auto flex-shrink-0 flex flex-col gap-1 pt-3 px-4">
           <div class="flex justify-between items-end mb-1">
-            <span class="text-[10px] text-gray-400 font-mono" id="bottom-timecode">0:00</span>
-            <span class="text-[10px] text-gray-400 font-mono" id="duration-timer">0:00</span>
+            <span class="text-[10px] text-[#b3b3b3] font-mono" id="bottom-timecode">0:00</span>
+            <span class="text-[10px] text-[#b3b3b3] font-mono" id="duration-timer">0:00</span>
           </div>
           <canvas id="podcast-waveform"></canvas>
           
           <div class="flex justify-between items-center mt-3">
-            <button id="mode-btn" aria-label="切换播放模式" title="切换播放模式" class="text-gray-400 hover:text-black transition-colors">
+            <button id="mode-btn" aria-label="切换播放模式" title="切换播放模式">
               <i class="ph ph-repeat text-2xl" id="mode-icon"></i>
             </button>
             
             <div class="flex items-center gap-6">
-              <button id="prev-btn" aria-label="上一首" title="上一首" class="text-gray-300 hover:text-black"><i class="ph-fill ph-skip-back text-2xl"></i></button>
-              <button id="play-btn" aria-label="播放或暂停" title="播放或暂停" class="w-14 h-14 rounded-full bg-black text-white flex items-center justify-center shadow-xl hover:scale-105 transition-transform"><i class="ph-fill ph-play text-2xl" id="play-icon"></i></button>
-              <button id="next-btn" aria-label="下一首" title="下一首" class="text-gray-300 hover:text-black"><i class="ph-fill ph-skip-forward text-2xl"></i></button>
+              <button id="prev-btn" aria-label="上一首" title="上一首"><i class="ph-fill ph-skip-back text-2xl"></i></button>
+              <button id="play-btn" aria-label="播放或暂停" title="播放或暂停"><i class="ph-fill ph-play text-2xl" id="play-icon"></i></button>
+              <button id="next-btn" aria-label="下一首" title="下一首"><i class="ph-fill ph-skip-forward text-2xl"></i></button>
             </div>
             
-            <button id="open-playlist" aria-label="打开播放列表" title="打开播放列表" class="text-emerald-500 hover:text-emerald-600 transition-colors">
+            <button id="open-playlist" aria-label="打开播放列表" title="打开播放列表">
               <i class="ph ph-list-bullets text-2xl"></i>
             </button>
           </div>
@@ -121,12 +121,12 @@
     <input type="file" id="audio-upload" accept="audio/*" multiple class="hidden">
 
     <div id="album-modal" class="absolute inset-0 bg-black/80 flex items-center justify-center z-[300] hidden">
-      <div class="bg-[#1a1a1a] p-6 rounded-xl border border-gray-800 w-72">
-        <h3 class="text-xs font-bold mb-4 text-emerald-500 uppercase tracking-widest">新建专辑</h3>
-        <input type="text" id="new-album-name" class="w-full bg-black border border-gray-700 rounded-lg p-3 text-xs text-white mb-4 outline-none focus:border-emerald-500" placeholder="专辑名称...">
+      <div class="bg-[#282828] p-6 rounded-lg border border-[#4d4d4d] w-72" style="box-shadow: 0 8px 24px rgba(0,0,0,0.5);">
+        <h3 class="text-xs font-bold mb-4 text-[#1ed760] uppercase tracking-widest">新建专辑</h3>
+        <input type="text" id="new-album-name" class="w-full bg-[#1f1f1f] border border-[#4d4d4d] rounded-lg p-3 text-xs text-white mb-4 outline-none focus:border-[#1ed760]" placeholder="专辑名称...">
         <div class="flex gap-2">
-          <button id="album-cancel" class="flex-1 py-2 bg-gray-800 rounded-lg text-[10px]">取消</button>
-          <button id="album-ok" class="flex-1 py-2 bg-emerald-600 rounded-lg text-[10px] font-bold">创建</button>
+          <button id="album-cancel" class="flex-1 py-2 bg-[#1f1f1f] rounded-full text-[10px] text-white uppercase tracking-wider">取消</button>
+          <button id="album-ok" class="flex-1 py-2 bg-[#1ed760] rounded-full text-[10px] font-bold text-black uppercase tracking-wider">创建</button>
         </div>
       </div>
     </div>

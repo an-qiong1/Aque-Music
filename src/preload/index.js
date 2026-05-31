@@ -29,13 +29,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
   audioSetVolume: (vol) => ipcRenderer.invoke('audio:setVolume', vol),
   audioGetVolume: () => ipcRenderer.invoke('audio:getVolume'),
   audioGetState: () => ipcRenderer.invoke('audio:getState'),
-  audioGetState: () => ipcRenderer.invoke('audio:getState'),
 
   // Tags & Lyrics
+  readAllMetadata: (filePath) => ipcRenderer.invoke('tag:readAll', filePath),
   readTags: (filePath) => ipcRenderer.invoke('tag:read', filePath),
   readCover: (filePath) => ipcRenderer.invoke('tag:readCover', filePath),
   readLrc: (audioPath) => ipcRenderer.invoke('lrc:read', audioPath),
-  searchOnlineLyrics: (title, artist) => ipcRenderer.invoke('lyric:searchOnline', title, artist),
 
   // Library index
   getLibraryIndex: () => ipcRenderer.invoke('library:getIndex'),

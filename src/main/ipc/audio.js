@@ -3,17 +3,11 @@ const path = require('path');
 const fs = require('fs');
 
 let _manualProgressTimeout = null;
-let _smtcUpdatePending = false;
 let _lastSmtcInfo = null;
 
 const VOLUME_FILE = 'aque-volume.json';
 
-let smtc = null;
-try {
-  smtc = require('../smtc/integration.js');
-} catch (err) {
-  console.warn('[SMTC] Failed to load integration:', err.message);
-}
+const smtc = require('../smtc/integration.js');
 
 function getVolumePath() {
   return path.join(app.getPath('userData'), VOLUME_FILE);
@@ -35,26 +29,55 @@ function saveVolume(vol) {
   } catch {}
 }
 
-function register({ audio, getWin, setProgressBar }) {
+function register({ audio, getWin, setProgressBar, setSongInfo }) {
   ipcMain.handle('audio:init', () => {
-    const ok = audio.init();
-    if (ok) audio.setVolume(loadSavedVolume());
-    return ok;
+    try {
+      const ok = audio.init();
+      if (ok) audio.setVolume(loadSavedVolume());
+      return ok;
+    } catch (err) {
+      console.error('[Audio] init error:', err.message);
+      return false;
+    }
   });
-  ipcMain.handle('audio:load', (_e, fp) => audio.load(fp));
-  ipcMain.handle('audio:loadAndPlay', (_e, fp) => audio.loadAndPlay(fp));
-  ipcMain.handle('audio:play', () => audio.play());
-  ipcMain.handle('audio:pause', () => audio.pause());
-  ipcMain.handle('audio:playPause', () => audio.playPause());
-  ipcMain.handle('audio:stop', () => audio.stop());
-  ipcMain.handle('audio:seek', (_e, s) => audio.seek(s));
+  ipcMain.handle('audio:load', (_e, fp) => {
+    try { return audio.load(fp); } catch (err) { console.error('[Audio] load error:', err.message); return false; }
+  });
+  ipcMain.handle('audio:loadAndPlay', (_e, fp) => {
+    try { return audio.loadAndPlay(fp); } catch (err) { console.error('[Audio] loadAndPlay error:', err.message); return false; }
+  });
+  ipcMain.handle('audio:play', () => {
+    try { return audio.play(); } catch (err) { console.error('[Audio] play error:', err.message); return false; }
+  });
+  ipcMain.handle('audio:pause', () => {
+    try { return audio.pause(); } catch (err) { console.error('[Audio] pause error:', err.message); return false; }
+  });
+  ipcMain.handle('audio:playPause', () => {
+    try { return audio.playPause(); } catch (err) { console.error('[Audio] playPause error:', err.message); return false; }
+  });
+  ipcMain.handle('audio:stop', () => {
+    try { return audio.stop(); } catch (err) { console.error('[Audio] stop error:', err.message); return false; }
+  });
+  ipcMain.handle('audio:seek', (_e, s) => {
+    try { return audio.seek(s); } catch (err) { console.error('[Audio] seek error:', err.message); return false; }
+  });
   ipcMain.handle('audio:setVolume', (_e, v) => {
-    audio.setVolume(v);
-    saveVolume(v);
+    try {
+      const vol = Math.max(0, Math.min(1, Number(v) || 0));
+      audio.setVolume(vol);
+      saveVolume(vol);
+      return true;
+    } catch (err) { console.error('[Audio] setVolume error:', err.message); return false; }
   });
-  ipcMain.handle('audio:getVolume', () => audio.getVolume());
-  ipcMain.handle('audio:getState', () => audio.getState());
-  ipcMain.handle('audio:isLoaded', () => audio.isLoaded());
+  ipcMain.handle('audio:getVolume', () => {
+    try { return audio.getVolume(); } catch (err) { console.error('[Audio] getVolume error:', err.message); return 0.8; }
+  });
+  ipcMain.handle('audio:getState', () => {
+    try { return audio.getState(); } catch (err) { console.error('[Audio] getState error:', err.message); return { state: 'stopped', position: 0, length: 0 }; }
+  });
+  ipcMain.handle('audio:isLoaded', () => {
+    try { return audio.isLoaded(); } catch (err) { console.error('[Audio] isLoaded error:', err.message); return false; }
+  });
   ipcMain.handle('smtc:setTaskbarProgress', (_e, progress, state) => {
     setProgressBar(progress, state);
     if (_manualProgressTimeout) clearTimeout(_manualProgressTimeout);
@@ -64,7 +87,11 @@ function register({ audio, getWin, setProgressBar }) {
   });
 
   ipcMain.handle('smtc:update', async (_e, info) => {
-    if (!smtc) return false;
+    // 更新托盘歌曲信息
+    if (setSongInfo) {
+      setSongInfo(info.title, info.artist);
+    }
+    if (!smtc.isAvailable()) return false;
     try {
       _lastSmtcInfo = info;
       const result = await smtc.updateMediaInfo({
@@ -74,7 +101,7 @@ function register({ audio, getWin, setProgressBar }) {
         coverBase64: info.cover || null
       });
       if (result && info.state) {
-        await smtc.updatePlaybackState({
+        smtc.updatePlaybackState({
           state: info.state,
           position: info.position || 0,
           duration: info.duration || 0
@@ -95,21 +122,21 @@ function register({ audio, getWin, setProgressBar }) {
         setProgressBar(data.position / data.length, data.state);
       }
     }
-    if (smtc && data.state && _lastSmtcInfo) {
-      if (!_smtcUpdatePending) {
-        _smtcUpdatePending = true;
-        smtc.updatePlaybackState({
-          state: data.state,
-          position: data.position,
-          duration: data.length
-        }).catch(() => {}).finally(() => {
-          _smtcUpdatePending = false;
-        });
-      }
+    // 定期更新 SMTC 播放状态（同步调用，无性能问题）
+    if (smtc.isAvailable() && data.state && _lastSmtcInfo) {
+      smtc.updatePlaybackState({
+        state: data.state,
+        position: data.position,
+        duration: data.length
+      });
     }
   });
 
   audio.onState((event) => {
+    // 停止时清除 SMTC 缓存
+    if (event === 'completed' || event === 'stopped') {
+      _lastSmtcInfo = null;
+    }
     const win = getWin();
     if (win && !win.isDestroyed())
       win.webContents.send('audio:stateEvent', event);

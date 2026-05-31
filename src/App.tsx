@@ -30,15 +30,9 @@ import {
   Music as MusicIcon,
   Trash2,
   Sparkles,
-  Loader2,
   Search,
-  Download,
-  Save
 } from 'lucide-react';
 import { ID3Writer } from 'browser-id3-writer';
-import { GoogleGenAI } from "@google/genai";
-
-const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || '' });
 
 // --- Types ---
 type PlayMode = 'sequential' | 'shuffle' | 'repeat-one';
@@ -57,8 +51,6 @@ interface Track {
   file: File;
   coverUrl?: string;
   lyrics?: string;
-  lyricSource?: string;
-  isFetchingLyrics?: boolean;
 }
 
 // --- Components ---
@@ -415,16 +407,6 @@ const LyricsDisplay = ({ track, currentTime, onSeek }: { track: Track | null, cu
                 <div className="font-mono text-[10px] uppercase tracking-widest text-black/40">Searching neural network...</div>
               </div>
             </motion.div>
-          ) : track.isFetchingLyrics ? (
-            <motion.div 
-              key="fetching"
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              className="w-full h-full flex flex-col items-center justify-center gap-4 text-black/20"
-            >
-              <Loader2 className="animate-spin" size={32} />
-              <span className="text-[10px] font-black uppercase tracking-[0.4em]">Optimizing Metadata...</span>
-            </motion.div>
           ) : parsedLyrics.length > 0 ? (
             <motion.div
               key={`lyrics-${track.id}`}
@@ -634,53 +616,6 @@ export default function App() {
     const resolvedTracks = await Promise.all(newTracksPromises);
     setTracks(prev => [...prev, ...resolvedTracks]);
     if (!currentTrackId && resolvedTracks.length > 0) setCurrentTrackId(resolvedTracks[0].id);
-
-    // Fetch lyrics only if not found in metadata
-    resolvedTracks.forEach(track => {
-      if (!track.lyrics) {
-        fetchLyrics(track.id, track.name, track.artist);
-      }
-    });
-  };
-
-  const fetchLyrics = async (trackId: string, trackName: string, artist: string = "") => {
-    setTracks(prev => prev.map(t => t.id === trackId ? { ...t, isFetchingLyrics: true } : t));
-    try {
-      // 1. Try Local API (NetEase/QQ/Kugou)
-      const res = await fetch(`/api/lyrics?name=${encodeURIComponent(trackName)}&artist=${encodeURIComponent(artist)}`);
-      if (res.ok) {
-        const data = await res.json();
-        if (data.lyrics) {
-          setTracks(prev => prev.map(t => t.id === trackId ? { 
-            ...t, 
-            lyrics: data.lyrics, 
-            lyricSource: data.source,
-            isFetchingLyrics: false 
-          } : t));
-          return;
-        }
-      }
-
-      // 2. Fallback to Gemini AI for lyrics if API fails
-      const prompt = `Please provide the full lyrics for the song "${trackName}" by "${artist}". 
-Format the lyrics clearly with [mm:ss.xx] timestamps for each line if possible. 
-If you can't provide timestamps, provide just the lines.
-Format with double line breaks between stanzas. 
-Return ONLY the lyrics. If lyrics are unavailable, respond only with "Lyrics not found.".`;
-      
-      const response = await ai.models.generateContent({
-        model: "gemini-3-flash-preview",
-        contents: prompt,
-      });
-      
-      const lyrics = response.text;
-      const sanitized = lyrics?.toLowerCase().includes("not found") ? undefined : lyrics;
-      
-      setTracks(prev => prev.map(t => t.id === trackId ? { ...t, lyrics: sanitized, isFetchingLyrics: false } : t));
-    } catch (error) {
-      console.error("Lyrics fetch failed:", error);
-      setTracks(prev => prev.map(t => t.id === trackId ? { ...t, isFetchingLyrics: false } : t));
-    }
   };
 
   const handleTimeUpdate = () => {
@@ -721,38 +656,6 @@ Return ONLY the lyrics. If lyrics are unavailable, respond only with "Lyrics not
   };
 
   const togglePlay = () => setIsPlaying(!isPlaying);
-
-  const downloadWithLyrics = async (track: Track) => {
-    if (!track.lyrics) return;
-    
-    try {
-      const arrayBuffer = await track.file.arrayBuffer();
-      const writer = new ID3Writer(arrayBuffer);
-      
-      // Embed lyrics in USLT frame
-      // USLT uses a description and language
-      writer.setFrame('USLT', {
-        description: '',
-        lyrics: track.lyrics,
-        language: 'zho' // Using Chinese as target
-      });
-      
-      writer.addTag();
-      const blob = writer.getBlob();
-      const url = URL.createObjectURL(blob);
-      
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `[LYRICS] ${track.file.name}`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
-    } catch (error) {
-      console.error('Failed to embed lyrics:', error);
-      alert('Failed to embed lyrics. This might be due to the file format or browser security constraints.');
-    }
-  };
   
   const skipForward = () => {
     if (tracks.length === 0) return;
@@ -821,11 +724,6 @@ Return ONLY the lyrics. If lyrics are unavailable, respond only with "Lyrics not
                 <p className="text-base font-bold text-black/30 mt-0.5 uppercase">
                   {currentTrack?.artist || "READY_FOR_UPLOAD"}
                 </p>
-                {currentTrack?.lyricSource && (
-                  <span className="inline-block mt-1 px-2 py-0.5 bg-black/5 rounded text-[8px] font-bold text-black/40 uppercase tracking-widest">
-                    Source: {currentTrack.lyricSource}
-                  </span>
-                )}
               </div>
               <AlbumArt track={currentTrack} size="small" />
             </div>

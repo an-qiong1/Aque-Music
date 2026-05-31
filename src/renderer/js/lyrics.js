@@ -2,6 +2,8 @@ AQUE.Lyrics = {
   _container: null,
   _wrapper: null,
   _lineCache: null,
+  _resizeHandler: null,
+  _resizeTimeout: null,
 
   init() {
     this._container = document.getElementById('lyric-container');
@@ -10,29 +12,21 @@ AQUE.Lyrics = {
       console.error('Lyric container or wrapper not found');
     }
 
-    let resizeTimeout;
-    window.addEventListener('resize', () => {
-      clearTimeout(resizeTimeout);
-      resizeTimeout = setTimeout(() => {
+    // 清理旧监听器（防止重复 init）
+    if (this._resizeHandler) {
+      window.removeEventListener('resize', this._resizeHandler);
+    }
+    
+    this._resizeHandler = () => {
+      clearTimeout(this._resizeTimeout);
+      this._resizeTimeout = setTimeout(() => {
         if (AQUE.State.lastLyricIdx >= 0) {
           this._container.scrollTop = 0;
           this.syncScroll(AQUE.State.lastLyricIdx);
         }
       }, 150);
-    });
-  },
-
-  async searchOnline(artist, title, loadToken) {
-    if (!AQUE.API.isElectron) return;
-    const lrcText = await AQUE.API.searchOnlineLyrics(title, artist);
-    if (loadToken !== undefined && loadToken !== AQUE.Player._loadCounter) return;
-    if (lrcText) {
-      AQUE.State.currentLyrics = AQUE.Utils.parseLRC(lrcText);
-      this.render();
-      if (AQUE.State.currentLyrics.length > 0) {
-        AQUE.Utils.showToast('已加载在线歌词', 1500);
-      }
-    }
+    };
+    window.addEventListener('resize', this._resizeHandler);
   },
 
   _isNewSong: false,

@@ -1,208 +1,240 @@
-const { spawn } = require('child_process');
+/**
+ * SMTC (System Media Transport Controls) 集成
+ * 使用 xosms 原生模块替代 PowerShell 脚本，提供更好的性能
+ */
+
 const path = require('path');
 const fs = require('fs');
-const os = require('os');
+const { app } = require('electron');
 
-let _tmpDir = null;
+let MediaPlayer = null;
+let MediaPlayerPlaybackStatus = null;
+let MediaPlayerThumbnail = null;
+let MediaPlayerThumbnailType = null;
+let MediaPlayerMediaType = null;
 
-function getTmpDir() {
-  if (!_tmpDir) {
-    _tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'aque-smtc-'));
-  }
-  return _tmpDir;
-}
-
-function escapeString(str) {
-  if (!str) return '';
-  return str.replace(/'/g, "''").replace(/`/g, '``');
-}
-
-function updateMediaInfo({ title, artist, album, coverBase64 }) {
-  return new Promise((resolve) => {
-    const tmpDir = getTmpDir();
-    const scriptPath = path.join(tmpDir, `smtc_${Date.now()}.ps1`);
-
-    const coverLine = coverBase64
-      ? `$thumb = [System.Convert]::FromBase64String('${coverBase64.replace(/^data:image\/\w+;base64,/, '')}')`
-      : '';
-
-    const psScript = `
-Add-Type -AssemblyName System.Runtime.WindowsRuntime
-Add-Type -AssemblyName System.Runtime
-
-$null = [Windows.Media.Control.GlobalSystemMediaTransportControlsSessionManager, Windows.Media.Control, ContentType = WindowsRuntime]
-
-$sessionMgr = [Windows.Media.Control.GlobalSystemMediaTransportControlsSessionManager]::RequestAsync().GetAwaiter().GetResult()
-$session = $sessionMgr.GetCurrentSession()
-
-if ($session -eq $null) {
-    Write-Output 'NO_SESSION'
-    exit
-}
-
-$null = $session.TryEnterInteractiveSession()
-
-$props = $session.TryGetMediaPropertiesAsync().GetAwaiter().GetResult()
-if ($props -eq $null) {
-    Write-Output 'NO_PROPS'
-    exit
-}
-
-${coverLine}
-
-$asyncInfo = $session.UpdateMediaPropertiesAsync(
-    [Windows.Media.Control.GlobalSystemMediaTransportControlsSessionMediaProperties]::CreateFromTitleArtistAlbum(
-        '${escapeString(title || 'Unknown')}',
-        '${escapeString(artist || 'Unknown Artist')}',
-        '${escapeString(album || '')}'
-    )
-)
-
+// 尝试加载 xosms 模块
 try {
-    $asyncInfo.GetAwaiter().GetResult()
-    Write-Output 'OK'
-} catch {
-    Write-Output "ERROR: $($_.Exception.Message)"
+  const xosms = require('xosms');
+  MediaPlayer = xosms.MediaPlayer;
+  MediaPlayerPlaybackStatus = xosms.MediaPlayerPlaybackStatus;
+  MediaPlayerThumbnail = xosms.MediaPlayerThumbnail;
+  MediaPlayerThumbnailType = xosms.MediaPlayerThumbnailType;
+  MediaPlayerMediaType = xosms.MediaPlayerMediaType;
+} catch (err) {
+  console.warn('[SMTC] xosms module not available:', err.message);
 }
-`.trim();
 
-    fs.writeFileSync(scriptPath, '\ufeff' + psScript, 'utf8');
+let _player = null;
+let _isActivated = false;
+let _onPlayCallback = null;
+let _onPauseCallback = null;
+let _onNextCallback = null;
+let _onPreviousCallback = null;
 
-    const ps = spawn('powershell.exe', [
-      '-NoProfile',
-      '-NonInteractive',
-      '-ExecutionPolicy', 'Bypass',
-      '-File', scriptPath
-    ], {
-      windowsHide: true
-    });
+/**
+ * 初始化 SMTC 播放器
+ * @param {Object} callbacks - 回调函数集合
+ * @param {Function} callbacks.onPlay - 播放按钮回调
+ * @param {Function} callbacks.onPause - 暂停按钮回调
+ * @param {Function} callbacks.onNext - 下一曲回调
+ * @param {Function} callbacks.onPrevious - 上一曲回调
+ * @returns {boolean} 是否初始化成功
+ */
+function init(callbacks = {}) {
+  if (!MediaPlayer) {
+    console.warn('[SMTC] xosms not available, SMTC disabled');
+    return false;
+  }
 
-    let stdout = '';
-    let stderr = '';
+  try {
+    _player = new MediaPlayer('aque-music', 'AQUE Player');
+    
+    // 保存回调
+    _onPlayCallback = callbacks.onPlay || null;
+    _onPauseCallback = callbacks.onPause || null;
+    _onNextCallback = callbacks.onNext || null;
+    _onPreviousCallback = callbacks.onPrevious || null;
 
-    ps.stdout.on('data', (data) => {
-      stdout += data.toString();
-    });
+    // 启用控制按钮
+    _player.playButtonEnabled = true;
+    _player.pauseButtonEnabled = true;
+    _player.nextButtonEnabled = true;
+    _player.previousButtonEnabled = true;
 
-    ps.stderr.on('data', (data) => {
-      stderr += data.toString();
-    });
+    // 监听系统按钮事件
+    _player.on('buttonpressed', (err, button) => {
+      if (err) {
+        console.error('[SMTC] Button press error:', err);
+        return;
+      }
 
-    ps.on('close', () => {
-      try {
-        fs.unlinkSync(scriptPath);
-      } catch {}
-      const result = stdout.trim();
-      if (result.includes('ERROR')) {
-        console.error('[SMTC] Update failed:', result);
-        resolve(false);
-      } else {
-        resolve(result === 'OK' || result === 'NO_SESSION' || result === 'NO_PROPS');
+      switch (button) {
+        case 'play':
+          if (_onPlayCallback) _onPlayCallback();
+          break;
+        case 'pause':
+          if (_onPauseCallback) _onPauseCallback();
+          break;
+        case 'next':
+          if (_onNextCallback) _onNextCallback();
+          break;
+        case 'previous':
+          if (_onPreviousCallback) _onPreviousCallback();
+          break;
       }
     });
 
-    ps.on('error', () => {
-      try {
-        fs.unlinkSync(scriptPath);
-      } catch {}
-      resolve(false);
-    });
-  });
-}
-
-function updatePlaybackState({ state, position, duration }) {
-  return new Promise((resolve) => {
-    const tmpDir = getTmpDir();
-    const scriptPath = path.join(tmpDir, `smtc_state_${Date.now()}.ps1`);
-
-    let playbackStatus = 'Unknown';
-    if (state === 'playing') {
-      playbackStatus = 'Playing';
-    } else if (state === 'paused') {
-      playbackStatus = 'Paused';
-    } else if (state === 'stopped') {
-      playbackStatus = 'Stopped';
-    }
-
-    const psScript = `
-Add-Type -AssemblyName System.Runtime.WindowsRuntime
-Add-Type -AssemblyName System.Runtime
-
-$null = [Windows.Media.Control.GlobalSystemMediaTransportControlsSessionManager, Windows.Media.Control, ContentType = WindowsRuntime]
-
-$sessionMgr = [Windows.Media.Control.GlobalSystemMediaTransportControlsSessionManager]::RequestAsync().GetAwaiter().GetResult()
-$session = $sessionMgr.GetCurrentSession()
-
-if ($session -eq $null) {
-    Write-Output 'NO_SESSION'
-    exit
-}
-
-$null = $session.TryEnterInteractiveSession()
-
-$timeline = [Windows.Media.Control.GlobalSystemMediaTransportControlsSessionTimelineProperties]::CreateFromValues(
-    [System.TimeSpan]::FromSeconds(${position || 0}),
-    [System.TimeSpan]::FromSeconds(${duration || 0}),
-    [System.TimeSpan]::Zero,
-    [System.TimeSpan]::Zero
-)
-
-$null = $session.TryUpdateTimelineProperties($timeline)
-
-$playbackInfo = $session.GetPlaybackInfo()
-if ($playbackInfo) {
-    $newInfo = [Windows.Media.Control.GlobalSystemMediaTransportControlsSessionPlaybackInfo]::CreateFromPlaybackInfo($playbackInfo)
-    $newInfo.PlaybackStatus = [Windows.Media.Control.GlobalSystemMediaTransportControlsSessionPlaybackStatus]::${playbackStatus}
-    $null = $session.TryUpdatePlaybackInfo($newInfo)
-}
-
-Write-Output 'OK'
-`.trim();
-
-    fs.writeFileSync(scriptPath, '\ufeff' + psScript, 'utf8');
-
-    const ps = spawn('powershell.exe', [
-      '-NoProfile',
-      '-NonInteractive',
-      '-ExecutionPolicy', 'Bypass',
-      '-File', scriptPath
-    ], {
-      windowsHide: true
-    });
-
-    let stdout = '';
-
-    ps.stdout.on('data', (data) => {
-      stdout += data.toString();
-    });
-
-    ps.on('close', () => {
-      try {
-        fs.unlinkSync(scriptPath);
-      } catch {}
-      resolve(stdout.trim() === 'OK');
-    });
-
-    ps.on('error', () => {
-      try {
-        fs.unlinkSync(scriptPath);
-      } catch {}
-      resolve(false);
-    });
-  });
-}
-
-function cleanup() {
-  if (_tmpDir && fs.existsSync(_tmpDir)) {
-    try {
-      fs.rmSync(_tmpDir, { recursive: true, force: true });
-    } catch {}
-    _tmpDir = null;
+    console.log('[SMTC] Initialized successfully');
+    return true;
+  } catch (err) {
+    console.error('[SMTC] Init failed:', err);
+    _player = null;
+    return false;
   }
 }
 
+/**
+ * 更新媒体信息
+ * @param {Object} info - 媒体信息
+ * @param {string} info.title - 歌曲标题
+ * @param {string} info.artist - 艺术家
+ * @param {string} info.album - 专辑名称
+ * @param {string} info.coverBase64 - 封面图片的 Base64 编码（可选）
+ * @returns {Promise<boolean>} 是否更新成功
+ */
+async function updateMediaInfo({ title, artist, album, coverBase64 }) {
+  if (!_player) {
+    return false;
+  }
+
+  try {
+    // 设置媒体类型（必须在设置元数据之前）
+    if (MediaPlayerMediaType) {
+      _player.mediaType = MediaPlayerMediaType.Music;
+    }
+    
+    // 设置元数据
+    _player.title = title || 'Unknown';
+    _player.artist = artist || 'Unknown Artist';
+    _player.albumTitle = album || '';
+
+    // 设置封面
+    if (coverBase64 && MediaPlayerThumbnail && MediaPlayerThumbnailType) {
+      try {
+        // xosms 0.6.2: create() 是异步工厂方法
+        // 对于 data URI，使用 Uri 类型
+        const thumbnail = await MediaPlayerThumbnail.create(
+          MediaPlayerThumbnailType.Uri,
+          coverBase64
+        );
+        _player.setThumbnail(thumbnail);
+      } catch (thumbErr) {
+        console.warn('[SMTC] Thumbnail set failed:', thumbErr.message);
+      }
+    }
+
+    // 推送更新到系统
+    _player.update();
+
+    // 激活 SMTC（如果尚未激活）
+    if (!_isActivated) {
+      _player.activate();
+      _isActivated = true;
+    }
+
+    return true;
+  } catch (err) {
+    console.error('[SMTC] Update media info failed:', err);
+    return false;
+  }
+}
+
+/**
+ * 更新播放状态
+ * @param {Object} stateInfo - 状态信息
+ * @param {string} stateInfo.state - 播放状态 ('playing', 'paused', 'stopped')
+ * @param {number} stateInfo.position - 当前位置（秒）
+ * @param {number} stateInfo.duration - 总时长（秒）
+ * @returns {boolean} 是否更新成功
+ */
+function updatePlaybackState({ state, position, duration }) {
+  if (!_player) {
+    return false;
+  }
+
+  try {
+    // 设置播放状态
+    switch (state) {
+      case 'playing':
+        _player.playbackStatus = MediaPlayerPlaybackStatus.Playing;
+        break;
+      case 'paused':
+        _player.playbackStatus = MediaPlayerPlaybackStatus.Paused;
+        break;
+      case 'stopped':
+        _player.playbackStatus = MediaPlayerPlaybackStatus.Stopped;
+        break;
+      default:
+        _player.playbackStatus = MediaPlayerPlaybackStatus.Unknown;
+    }
+
+    // 更新进度条（xosms 要求每次位置变化时调用）
+    if (typeof position === 'number' && typeof duration === 'number' && duration > 0) {
+      _player.setTimeline(duration, position);
+    }
+
+    return true;
+  } catch (err) {
+    console.error('[SMTC] Update playback state failed:', err);
+    return false;
+  }
+}
+
+/**
+ * 更新回调函数
+ * @param {Object} callbacks - 回调函数集合
+ */
+function updateCallbacks(callbacks) {
+  if (callbacks.onPlay !== undefined) _onPlayCallback = callbacks.onPlay;
+  if (callbacks.onPause !== undefined) _onPauseCallback = callbacks.onPause;
+  if (callbacks.onNext !== undefined) _onNextCallback = callbacks.onNext;
+  if (callbacks.onPrevious !== undefined) _onPreviousCallback = callbacks.onPrevious;
+}
+
+/**
+ * 清理资源
+ */
+function cleanup() {
+  if (_player) {
+    try {
+      // xosms 不需要显式停用，垃圾回收会处理
+      _player = null;
+      _isActivated = false;
+      _onPlayCallback = null;
+      _onPauseCallback = null;
+      _onNextCallback = null;
+      _onPreviousCallback = null;
+      console.log('[SMTC] Cleaned up');
+    } catch (err) {
+      console.error('[SMTC] Cleanup error:', err);
+    }
+  }
+}
+
+/**
+ * 检查 SMTC 是否可用
+ * @returns {boolean}
+ */
+function isAvailable() {
+  return !!MediaPlayer;
+}
+
 module.exports = {
+  init,
   updateMediaInfo,
   updatePlaybackState,
-  cleanup
+  updateCallbacks,
+  cleanup,
+  isAvailable
 };

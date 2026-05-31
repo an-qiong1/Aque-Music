@@ -73,7 +73,7 @@ function startWatching(folderPath, getWin) {
   const watcher = chokidar.watch(folderPath, {
     ignored: /(^|[\/\\])\../,
     persistent: true,
-    depth: 5,
+    depth: 20,
     interval: 2000,
   });
 

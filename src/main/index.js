@@ -7,13 +7,9 @@ const shortcuts = require('./utils/shortcuts.js');
 const { registerAll } = require('./ipc/register.js');
 const { cleanupAllWatchers } = require('./ipc/files.js');
 const { isAudioFile } = require('./utils/audio-formats.js');
+const sleepTimer = require('./utils/sleep-timer.js');
 
-let smtc = null;
-try {
-  smtc = require('./smtc/integration.js');
-} catch (err) {
-  console.warn('[Main] SMTC integration not available:', err.message);
-}
+const smtc = require('./smtc/integration.js');
 
 const audio = new AudioService();
 
@@ -58,8 +54,29 @@ app.whenReady().then(() => {
   audio.init();
   registerAll(deps);
   audio.start();
-  tray.create(deps);
+  const { setSongInfo } = tray.create(deps);
+  deps.setSongInfo = setSongInfo;
   shortcuts.register(deps);
+
+  // 初始化 SMTC 并设置媒体控制回调
+  if (smtc.isAvailable()) {
+    smtc.init({
+      onPlay: () => audio.play(),
+      onPause: () => audio.pause(),
+      onNext: () => {
+        const win = window.getWin();
+        if (win && !win.isDestroyed()) {
+          win.webContents.send('shortcut:next', 'next');
+        }
+      },
+      onPrevious: () => {
+        const win = window.getWin();
+        if (win && !win.isDestroyed()) {
+          win.webContents.send('shortcut:prev', 'prev');
+        }
+      }
+    });
+  }
 
   const fp = process.argv.find(a => isAudioFile(a));
   if (fp) handleFilePath(fp);
@@ -75,11 +92,13 @@ app.on('activate', () => {
 });
 
 app.on('before-quit', () => {
-  app.isQuitting = true;
+  // 确保isQuitting状态一致
+  if (!app.isQuitting) {
+    app.isQuitting = true;
+  }
   shortcuts.unregisterAll();
   cleanupAllWatchers();
+  sleepTimer.stopSleepTimer();
   audio.dispose();
-  if (smtc && smtc.cleanup) {
-    smtc.cleanup();
-  }
+  smtc.cleanup();
 });

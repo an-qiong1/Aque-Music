@@ -1,5 +1,5 @@
 AQUE.App = {
-  _pendingFileToPlay: null,
+  _pendingFilesToPlay: [],
   _libraryLoaded: false,
 
   init() {
@@ -90,7 +90,7 @@ AQUE.App = {
 
     AQUE.API.onFileOpen((filePath) => {
       if (!this._libraryLoaded) {
-        this._pendingFileToPlay = filePath;
+        this._pendingFilesToPlay.push(filePath);
         return;
       }
       this._playFile(filePath);
@@ -192,11 +192,8 @@ AQUE.App = {
           AQUE.State.activeAlbumIndex = saved.activeAlbumIndex;
         }
         AQUE.State.libraryFolders = Array.isArray(saved.libraryFolders) ? saved.libraryFolders : [];
-        if (typeof saved.autoOnlineLyrics === 'boolean') {
-          AQUE.State.autoOnlineLyrics = saved.autoOnlineLyrics;
-        }
         AQUE.Playlist.render();
-        if (!this._pendingFileToPlay && saved.currentPlayingIndex >= 0) {
+        if (this._pendingFilesToPlay.length === 0 && saved.currentPlayingIndex >= 0) {
           AQUE.Player.restoreSelectedTrack(saved.currentPlayingIndex);
         }
         for (const folder of AQUE.State.libraryFolders) {
@@ -223,10 +220,12 @@ AQUE.App = {
         }).catch(() => {});
       }
       this._libraryLoaded = true;
-      if (this._pendingFileToPlay) {
-        const pendingFile = this._pendingFileToPlay;
-        this._pendingFileToPlay = null;
-        this._playFile(pendingFile);
+      if (this._pendingFilesToPlay.length > 0) {
+        const pending = [...this._pendingFilesToPlay];
+        this._pendingFilesToPlay = [];
+        for (const fp of pending) {
+          this._playFile(fp);
+        }
       }
     }).catch(() => {});
   },

@@ -11,7 +11,6 @@ AQUE.State = {
   isPlaying: false,
   currentDuration: 0,
   libraryFolders: [],
-  autoOnlineLyrics: true,
 
   setCurrentPlayingIndex(index) {
     this.currentPlayingIndex = index;
@@ -28,7 +27,7 @@ AQUE.State = {
 
 AQUE.CoverCache = {
   _cache: new Map(),
-  _MAX: 200,
+  _MAX: 500,
   get(path) {
     return this._cache.get(path);
   },
@@ -71,7 +70,13 @@ AQUE.API = {
   audioSeek(s) { if (this.isElectron) return window.electronAPI.audioSeek(s); },
   audioSetVolume(v) { if (this.isElectron) return window.electronAPI.audioSetVolume(v); },
   audioGetVolume() { if (this.isElectron) return window.electronAPI.audioGetVolume(); return Promise.resolve(0.8); },
+  audioGetState() { if (this.isElectron) return window.electronAPI.audioGetState(); return Promise.resolve({ state: 'stopped', position: 0, length: 0 }); },
 
+  readAllMetadata(fp) {
+    // Cached in main process disk cache (faster than re-parsing)
+    if (this.isElectron) return window.electronAPI.readAllMetadata(fp);
+    return Promise.resolve(null);
+  },
   readTags(fp) { if (this.isElectron) return window.electronAPI.readTags(fp); return Promise.resolve(null); },
   readCover(fp) {
     if (!this.isElectron) return Promise.resolve(null);
@@ -83,7 +88,6 @@ AQUE.API = {
     });
   },
   readLrc(ap) { if (this.isElectron) return window.electronAPI.readLrc(ap); return Promise.resolve(null); },
-  searchOnlineLyrics(t, a) { if (this.isElectron) return window.electronAPI.searchOnlineLyrics(t, a); return Promise.resolve(null); },
 
   getLibraryIndex() { if (this.isElectron) return window.electronAPI.getLibraryIndex(); return Promise.resolve(null); },
   buildLibraryIndex(folderPaths) { if (this.isElectron) return window.electronAPI.buildLibraryIndex(folderPaths); return Promise.resolve(null); },

@@ -23,7 +23,6 @@ class BassEngine {
     this.bassDir = bassDir || this._resolveBassDir();
     this._stream = 0;
     this._path = null;
-    this._wasapiExclusive = false;
     this._pausedPosition = 0;
     this._playbackRate = 1.0;
     this._fftBuffer = koffi.alloc('float', 1024);
@@ -69,20 +68,11 @@ class BassEngine {
       this.BASS_PluginLoad = lib.func('BASS_PluginLoad', 'uint32', ['string', 'uint32']);
     }
 
-    if (name === 'basswasapi.dll') {
-      this.BASS_WASAPI_Init = lib.func('BASS_WASAPI_Init', 'bool', ['int', 'uint32', 'uint32', 'uint32', 'float', 'uint32', voidPtr, voidPtr]);
-      this.BASS_WASAPI_Free = lib.func('BASS_WASAPI_Free', 'bool', []);
-      this.BASS_WASAPI_Start = lib.func('BASS_WASAPI_Start', 'bool', []);
-      this.BASS_WASAPI_Stop = lib.func('BASS_WASAPI_Stop', 'bool', ['bool']);
-      this.BASS_WASAPI_IsStarted = lib.func('BASS_WASAPI_IsStarted', 'bool', []);
-    }
-
     return lib;
   }
 
   _init() {
     this._bassLib = this._loadLib('bass.dll');
-    this._wasapiLib = this._loadLib('basswasapi.dll');
 
     this._loadPlugins();
 
@@ -147,7 +137,7 @@ class BassEngine {
   get filePath() { return this._path; }
 
   get length() {
-    if (!this._stream) return 1;
+    if (!this._stream) return 0;
     const bytes = this.BASS_ChannelGetLength(this._stream, BASS_POS_BYTE);
     return this.BASS_ChannelBytes2Seconds(this._stream, bytes);
   }
@@ -161,9 +151,6 @@ class BassEngine {
   get state() {
     if (!this._stream) return 'stopped';
     const s = this.BASS_ChannelIsActive(this._stream);
-    if (this._wasapiExclusive && s === BASS_ACTIVE_PLAYING) {
-      return this.BASS_WASAPI_IsStarted() ? 'playing' : 'paused';
-    }
     switch (s) {
       case BASS_ACTIVE_PLAYING: return 'playing';
       case BASS_ACTIVE_PAUSED: return 'paused';
@@ -190,15 +177,10 @@ class BassEngine {
   play() {
     if (!this._stream) return false;
     const resumePos = this._pausedPosition;
-    if (this._wasapiExclusive) {
+    this.seek(resumePos);
+    this.BASS_ChannelPlay(this._stream, false);
+    if (this.position !== resumePos) {
       this.seek(resumePos);
-      this.BASS_WASAPI_Start();
-    } else {
-      this.seek(resumePos);
-      this.BASS_ChannelPlay(this._stream, false);
-      if (this.position !== resumePos) {
-        this.seek(resumePos);
-      }
     }
     return true;
   }
@@ -206,22 +188,14 @@ class BassEngine {
   pause() {
     if (!this._stream) return false;
     this._pausedPosition = this.position;
-    if (this._wasapiExclusive) {
-      this.BASS_WASAPI_Stop(false);
-    } else {
-      this.BASS_ChannelPause(this._stream);
-    }
+    this.BASS_ChannelPause(this._stream);
     return true;
   }
 
   stop() {
     if (!this._stream) return false;
     this._pausedPosition = 0;
-    if (this._wasapiExclusive) {
-      this.BASS_WASAPI_Stop(false);
-    } else {
-      this.BASS_ChannelStop(this._stream);
-    }
+    this.BASS_ChannelStop(this._stream);
     return true;
   }
 
@@ -259,12 +233,6 @@ class BassEngine {
     return ok ? buf.value : 0;
   }
 
-  setWASAPIExclusive(enabled) {
-    this._wasapiExclusive = enabled;
-  }
-
-  get wasapiExclusive() { return this._wasapiExclusive; }
-
   getFFTData() {
     if (!this._stream || this.state !== 'playing') return null;
     const buf = this._fftBuffer;
@@ -277,7 +245,6 @@ class BassEngine {
 
   _freeStream() {
     if (this._stream) {
-      if (this._wasapiExclusive) this.BASS_WASAPI_Free();
       this.BASS_StreamFree(this._stream);
       this._stream = 0;
       this._path = null;

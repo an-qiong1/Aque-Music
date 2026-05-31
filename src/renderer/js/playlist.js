@@ -15,7 +15,7 @@ AQUE.Playlist = {
     this._coverObserver = null;
     this._coverQueue = [];
     this._coverQueueActive = 0;
-    this._coverQueueMaxConcurrent = 3;
+    this._coverQueueMaxConcurrent = 6;
 
     document.getElementById('add-btn').onclick = () => this._onAdd();
     document.getElementById('add-folder-btn').onclick = () => this._onAddFolder();
@@ -82,7 +82,6 @@ AQUE.Playlist = {
       activeAlbumIndex: AQUE.State.activeAlbumIndex,
       currentPlayingIndex: AQUE.State.currentPlayingIndex,
       libraryFolders: AQUE.State.libraryFolders,
-      autoOnlineLyrics: AQUE.State.autoOnlineLyrics,
     }).catch(() => {});
   },
 
@@ -192,7 +191,7 @@ AQUE.Playlist = {
 
     for (let displayIdx = 0; displayIdx < displayList.length; displayIdx++) {
       const file = displayList[displayIdx];
-      const trackKey = (file.path || file.name).toLowerCase();
+      const trackKey = (file.path || `name:${file.name}:${displayIdx}`).toLowerCase();
       const realIdx = isFiltering ? allTracks.findIndex(t => (t.path || t.name) === (file.path || file.name)) : displayIdx;
       const isNowPlaying = realIdx === AQUE.State.currentPlayingIndex;
       const isMissing = !!file.missing;
@@ -365,11 +364,42 @@ AQUE.Playlist = {
       }
     }, { rootMargin: '200px 0px' });
 
-    this._content.querySelectorAll('.playlist-cover[data-cover-path]').forEach(img => {
+    const allCovers = this._content.querySelectorAll('.playlist-cover[data-cover-path]');
+    // 主动预加载：前30首立即加入队列，其余使用 IntersectionObserver
+    let preloadCount = 0;
+    for (const img of allCovers) {
       if (!img.dataset.coverQueued) {
-        this._coverObserver.observe(img);
+        if (preloadCount < 30) {
+          img.dataset.coverQueued = '1';
+          this._coverQueue.push(img);
+          preloadCount++;
+        } else {
+          this._coverObserver.observe(img);
+        }
       }
-    });
+    }
+    if (preloadCount > 0) this._processCoverQueue();
+  },
+
+  // 预加载指定曲目列表的封面（播放相邻曲目时调用）
+  preloadCoversForTracks(trackList) {
+    if (!trackList || trackList.length === 0) return;
+    const paths = new Set();
+    for (const t of trackList) {
+      if (t && t.path) paths.add(t.path);
+    }
+    if (paths.size === 0) return;
+    const imgs = this._content.querySelectorAll('.playlist-cover[data-cover-path]');
+    let count = 0;
+    for (const img of imgs) {
+      if (img.dataset.coverQueued) continue;
+      if (paths.has(img.dataset.coverPath)) {
+        img.dataset.coverQueued = '1';
+        this._coverQueue.push(img);
+        count++;
+      }
+    }
+    if (count > 0) this._processCoverQueue();
   },
 
   _processCoverQueue() {
@@ -533,7 +563,7 @@ AQUE.Playlist = {
     AQUE.Utils.showToast('已导入 ' + added + ' 首歌曲', 2000);
   },
 
-  _onClear() {
+  async _onClear() {
     try {
       // 清空所有专辑的全部曲目
       let total = 0;
@@ -545,7 +575,7 @@ AQUE.Playlist = {
       AQUE.Player._trackMetaCache.clear();
       AQUE.Player.resetShuffleQueue();
       AQUE.Player.clearHistory();
-      if (AQUE.API.isElectron) AQUE.API.audioStop();
+      if (AQUE.API.isElectron) await AQUE.API.audioStop();
       AQUE.State.setCurrentPlayingIndex(-1);
       AQUE.State.currentLyrics = [];
       AQUE.State.lastLyricIdx = -1;

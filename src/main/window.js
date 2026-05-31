@@ -4,6 +4,7 @@ const fs = require('fs');
 
 let win = null;
 let isPinned = false;
+let closeBehavior = 'minimize'; // 'minimize' | 'quit'
 
 function create() {
   let winState = { width: 440, height: 850 };
@@ -40,8 +41,6 @@ function create() {
 
   win.loadFile(path.join(__dirname, '..', 'renderer', 'index.html'));
 
-  win.once('ready-to-show', () => win.show());
-
   win.webContents.on('console-message', (e, level, msg, line, sourceId) => {
     const tag = ['verbose','info','warning','error'][level] || 'log';
     console.log(`[RENDERER:${tag}] ${msg} (${sourceId || ''}:${line})`);
@@ -55,8 +54,8 @@ function create() {
     console.log('RENDERER TITLE:', title);
   });
 
-  win.show();
   win.once('ready-to-show', () => {
+    win.show();
     console.log('RENDERER ready-to-show');
   });
 
@@ -79,8 +78,14 @@ function create() {
 
   win.on('close', (e) => {
     if (!app.isQuitting) {
-      e.preventDefault();
-      win.hide();
+      if (closeBehavior === 'minimize') {
+        e.preventDefault();
+        win.hide();
+      } else {
+        // 用户选择退出时，设置app.isQuitting并退出
+        app.isQuitting = true;
+        app.quit();
+      }
     }
   });
 

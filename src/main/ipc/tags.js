@@ -1,13 +1,10 @@
-const { ipcMain } = require('electron');
+const { ipcMain, app } = require('electron');
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
 const iconv = require('iconv-lite');
 const { parseFile } = require('../utils/audio-metadata.js');
-const lyricsApi = require('../lyrics/provider.js');
 const { trustedHandler, assertTrustedSender, assertFilePath } = require('../utils/ipc-utils.js');
-
-let _currentLyricsSearchToken = 0;
-let _pendingLyricsSearch = null;
 
 function detectAndConvertEncoding(buffer, hint) {
   // When hint is 'chinese', try GBK-family first, then fall through to UTF-8
@@ -39,6 +36,160 @@ function detectAndConvertEncoding(buffer, hint) {
   return utf8Decoded;
 }
 
+// ── Disk metadata cache ──
+const _cacheDir = (() => {
+  try {
+    const dir = path.join(app.getPath('userData'), 'cache', 'meta');
+    fs.mkdirSync(dir, { recursive: true });
+    return dir;
+  } catch { return null; }
+})();
+
+function _getCachePath(filePath) {
+  if (!_cacheDir) return null;
+  const hash = crypto.createHash('md5').update(filePath).digest('hex');
+  return path.join(_cacheDir, hash + '.json');
+}
+
+function _readDiskCache(filePath) {
+  try {
+    const cachePath = _getCachePath(filePath);
+    if (!cachePath || !fs.existsSync(cachePath)) return null;
+    const stat = fs.statSync(filePath);
+    const mtime = stat.mtimeMs;
+    const cached = JSON.parse(fs.readFileSync(cachePath, 'utf-8'));
+    if (cached.mtime === mtime && cached.filePath === filePath) {
+      return cached.data;
+    }
+  } catch {}
+  return null;
+}
+
+function _writeDiskCache(filePath, data) {
+  try {
+    const cachePath = _getCachePath(filePath);
+    if (!cachePath) return;
+    const stat = fs.statSync(filePath);
+    fs.writeFileSync(cachePath, JSON.stringify({
+      mtime: stat.mtimeMs, filePath, data
+    }));
+  } catch {}
+}
+
+// ── Shared metadata extraction ──
+function extractLyrics(meta) {
+  const tags = meta.common;
+  let lyricsContent = null;
+
+  if (tags.lyrics && Array.isArray(tags.lyrics) && tags.lyrics.length > 0) {
+    const lyricTag = tags.lyrics[0];
+    let text = null;
+    if (typeof lyricTag === 'string') {
+      text = lyricTag;
+    } else if (lyricTag.syncText && Array.isArray(lyricTag.syncText) && lyricTag.syncText.length > 0) {
+      const isMillis = lyricTag.timeStampFormat === 2;
+      text = lyricTag.syncText.map(line => {
+        if (line && line.text) {
+          const timeSec = (line.timestamp || 0) / (isMillis ? 1000 : 1);
+          const minutes = Math.floor(timeSec / 60);
+          const secs = Math.floor(timeSec % 60);
+          const millis = Math.floor((timeSec % 1) * 100);
+          return `[${String(minutes).padStart(2, '0')}:${String(secs).padStart(2, '0')}.${String(millis).padStart(2, '0')}]${line.text}`;
+        }
+        return '';
+      }).filter(line => line).join('\n');
+    } else if (lyricTag.text && typeof lyricTag.text === 'string') {
+      text = lyricTag.text;
+    }
+    if (text) {
+      const alreadyHasCJK = /[\u4e00-\u9fa5]/.test(text);
+      if (!alreadyHasCJK || text.includes('\ufffd')) {
+        try {
+          const isChinese = lyricTag.language === 'chi' || lyricTag.language === 'zho';
+          const buffer = Buffer.from(text, 'latin1');
+          const decoded = detectAndConvertEncoding(buffer, isChinese ? 'chinese' : undefined);
+          if (/[\u4e00-\u9fa5]/.test(decoded) && decoded !== text) {
+            text = decoded;
+          }
+        } catch (e) {}
+      }
+      lyricsContent = text;
+    }
+  }
+
+  if (!lyricsContent && tags.lyric) {
+    lyricsContent = typeof tags.lyric === 'string' ? tags.lyric : (Array.isArray(tags.lyric) ? tags.lyric[0] : null);
+  }
+
+  if (!lyricsContent && tags.unsynchronisedLyrics) {
+    if (Array.isArray(tags.unsynchronisedLyrics) && tags.unsynchronisedLyrics.length > 0) {
+      const lyricObj = tags.unsynchronisedLyrics[0];
+      if (lyricObj && lyricObj.text) {
+        lyricsContent = lyricObj.text;
+      } else if (typeof lyricObj === 'string') {
+        lyricsContent = lyricObj;
+      }
+    } else if (typeof tags.unsynchronisedLyrics === 'object' && tags.unsynchronisedLyrics.text) {
+      lyricsContent = tags.unsynchronisedLyrics.text;
+    }
+  }
+
+  if (!lyricsContent && meta.native) {
+    for (const tagType of Object.keys(meta.native)) {
+      for (const frame of meta.native[tagType]) {
+        if ((frame.id === 'USLT' || frame.id === 'SYLT') && frame.value) {
+          let text = null;
+          const val = frame.value;
+          if (typeof val === 'string') {
+            text = val;
+          } else if (val.text && typeof val.text === 'string') {
+            text = val.text;
+          } else if (Array.isArray(val)) {
+            text = val.map(v => typeof v === 'string' ? v : (v.text || '')).filter(Boolean).join('\n');
+          }
+          if (text) {
+            lyricsContent = text;
+            break;
+          }
+        }
+      }
+      if (lyricsContent) break;
+    }
+  }
+
+  // 检测纯音乐
+  if (lyricsContent) {
+    const metaLineRegex = /^\[.*?\]\s*(作词|作曲|编曲|制作人|录音|混音|母带|监制|OP|SP|出品|营销|统筹|吉他|bass|和音|发行|封面|混音室|录音室|艺人统筹|音乐总监|推广|原唱|原曲|Lyrics by|Composed by|Produced by|Recorded|Mixed|Mastered|Published)/i;
+    const lines = lyricsContent.split('\n').map(l => l.trim()).filter(Boolean);
+    const nonMetaLines = lines.filter(l => !metaLineRegex.test(l));
+    const hasInstrumentalKeyword = /纯音乐|请欣赏|instrumental/i.test(lyricsContent);
+    if (hasInstrumentalKeyword || (lines.length > 0 && nonMetaLines.length === 0)) {
+      lyricsContent = null;
+    }
+  }
+
+  return lyricsContent;
+}
+
+function extractCover(meta) {
+  const pics = meta.common.picture;
+  if (pics && pics.length > 0) {
+    const pic = pics[0];
+    let dataBuffer;
+    if (Buffer.isBuffer(pic.data)) {
+      dataBuffer = pic.data;
+    } else if (pic.data instanceof Uint8Array) {
+      dataBuffer = Buffer.from(pic.data);
+    } else if (Array.isArray(pic.data)) {
+      dataBuffer = Buffer.from(pic.data);
+    } else {
+      return null;
+    }
+    return 'data:' + pic.format + ';base64,' + dataBuffer.toString('base64');
+  }
+  return null;
+}
+
 // 尝试从MP3文件中直接读取ID3标签中的歌词
 function readLyricsFromMp3(filePath) {
   try {
@@ -58,11 +209,14 @@ function readLyricsFromMp3(filePath) {
       
       // 遍历标签帧
       let offset = 10;
-      while (offset + 10 < size + 10) {
+      while (offset + 10 <= size + 10) {
         // 帧头: 4字节帧ID + 4字节大小 + 2字节标志
         const frameId = buffer.toString('ascii', offset, offset + 4);
         const frameSize = buffer.readUInt32BE(offset + 4);
         offset += 10;
+        
+        // 防止零大小帧导致死循环
+        if (frameSize <= 0) break;
         
         // 查找歌词帧（USLT - 非同步歌词，SYLT - 同步歌词）
         if (frameId === 'USLT' || frameId === 'SYLT') {
@@ -251,6 +405,9 @@ function register() {
 
   ipcMain.handle('tag:readCover', trustedHandler(async (event, filePath) => {
     assertFilePath(filePath, 'filePath');
+    // Try disk cache first（由 tag:readAll 写入）
+    const cached = _readDiskCache(filePath);
+    if (cached && cached.cover) return cached.cover;
     try {
       const meta = await parseFile(filePath, { skipCovers: false });
       const pics = meta.common.picture;
@@ -276,33 +433,60 @@ function register() {
     return null;
   }));
 
-  ipcMain.handle('lyric:searchOnline', trustedHandler(async (event, title, artist) => {
-    if (!title || !artist) return null;
+  // ── Unified readAll: single parseFile → tags + cover + lrc ──
+  ipcMain.handle('tag:readAll', trustedHandler(async (event, filePath) => {
+    assertFilePath(filePath, 'filePath');
 
-    const searchToken = ++_currentLyricsSearchToken;
+    // 1. Try disk cache first
+    const cached = _readDiskCache(filePath);
+    if (cached) return cached;
 
-    const searchPromise = (async () => {
-      try {
-        let lrc = await lyricsApi.searchOnline(title, artist);
-        if (searchToken !== _currentLyricsSearchToken) return null;
-        if (!lrc) {
-          lrc = await lyricsApi.searchOnlineFallback(title, artist);
-          if (searchToken !== _currentLyricsSearchToken) return null;
-        }
-        return lrc || null;
-      } catch {
-        return null;
+    // 2. Try renderer-side memory cache via null return (api.js handles it)
+    try {
+      const meta = await parseFile(filePath, { skipCovers: false });
+      const tags = meta.common;
+
+      // Extract lyrics
+      let lyricsContent = extractLyrics(meta);
+
+      // If no embedded lyrics, try MP3 direct read
+      if (!lyricsContent && filePath.toLowerCase().endsWith('.mp3')) {
+        const directLyrics = readLyricsFromMp3(filePath);
+        if (directLyrics) lyricsContent = directLyrics;
       }
-    })();
 
-    _pendingLyricsSearch = searchPromise;
-    const result = await searchPromise;
+      // Extract cover
+      const coverData = extractCover(meta);
 
-    if (_pendingLyricsSearch === searchPromise) {
-      _pendingLyricsSearch = null;
+      // Try LRC file
+      let lrcText = null;
+      for (const ext of ['.lrc', '.LRC']) {
+        const p = filePath.replace(/\.[^.]+$/, '') + ext;
+        if (fs.existsSync(p)) {
+          lrcText = detectAndConvertEncoding(fs.readFileSync(p));
+          break;
+        }
+      }
+
+      const result = {
+        title: tags.title || '', artist: tags.artist || '',
+        album: tags.album || '', duration: meta.format.duration || 0,
+        bitrate: meta.format.bitrate || null,
+        sampleRate: meta.format.sampleRate || null,
+        hasLyrics: !!lyricsContent,
+        lyrics: lyricsContent,
+        cover: coverData,
+        lrc: lrcText,
+      };
+
+      // Write disk cache
+      _writeDiskCache(filePath, result);
+
+      return result;
+    } catch (e) {
+      console.error('Error reading tags:', e);
+      return null;
     }
-
-    return result;
   }));
 }
 

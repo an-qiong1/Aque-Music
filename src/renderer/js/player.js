@@ -11,10 +11,12 @@ AQUE.Player = {
   _statsRecorded: false,
   _playedDuration: 0,
   _lastPositionUpdate: 0,
+  _handlingCompletion: false,
   _albumCover: null,
   _coverPlaceholder: null,
+  _saveTimer: null,
   _trackMetaCache: new Map(),  // key: filePath, value: { tags, cover, timestamp }
-  _TRACK_CACHE_MAX: 50,
+  _TRACK_CACHE_MAX: 500,
   _modes: [
     { icon: 'ph ph-repeat', toast: '列表循环' },
     { icon: 'ph ph-repeat-once', toast: '单曲循环' },
@@ -61,15 +63,15 @@ AQUE.Player = {
     }
   },
 
-  prev() {
+  async prev() {
     const tracks = AQUE.Playlist.getTracks();
     if (tracks.length === 0) return;
     let index = AQUE.State.currentPlayingIndex - 1;
     if (index < 0) index = tracks.length - 1;
-    this.playTrack(index);
+    await this.playTrack(index);
   },
 
-  next() {
+  async next() {
     const tracks = AQUE.Playlist.getTracks();
     if (tracks.length === 0) return;
     let index;
@@ -99,7 +101,7 @@ AQUE.Player = {
       index = AQUE.State.currentPlayingIndex + 1;
       if (index >= tracks.length) index = 0;
     }
-    this.playTrack(index);
+    await this.playTrack(index);
   },
 
     async restoreSelectedTrack(index) {
@@ -166,18 +168,46 @@ AQUE.Player = {
         }
         file.missing = false;
       }
-        await this._readTrackMetadata(file);
+        // 1. 立即用文件名填充 UI（等元数据到了再覆盖）
+        this.setTrackInfo(
+          file.title || AQUE.Utils.stripExtension(file.name),
+          file.artist || '未知艺术家'
+        );
         this._durationTimer.innerText = '0:00';
-        AQUE.API.audioLoadAndPlay(file.path);
+        AQUE.Playlist.render();
+        this._saveDebounced();
+
+        // 2. 播放音频（BASS 同步，快速）
+        const playOk = await AQUE.API.audioLoadAndPlay(file.path);
+        if (!playOk) {
+          AQUE.Utils.showToast('播放失败：' + (file.title || file.name), 2000);
+          return;
+        }
         this._statsTrackPath = file.path;
         this._statsRecorded = false;
         this._playedDuration = 0;
         this._lastPositionUpdate = Date.now();
-    }
 
-    this._setupMediaSession(file);
-    AQUE.Playlist.render();
-    this._saveDebounced();
+        // 3. 音频加载完成后设置媒体会话（确保状态同步）
+        this._setupMediaSession(file);
+
+        // 4. 后台加载精确元数据（不影响 UI 响应）
+        this._readTrackMetadata(file).then(() => {
+          this._setupMediaSession(file);
+        }).catch(() => {});
+
+        // 5. 预加载相邻曲目的封面
+        const t = AQUE.Playlist.getTracks();
+        if (t.length > 1) {
+          const s = Math.max(0, index - 20);
+          const e = Math.min(t.length - 1, index + 20);
+          AQUE.Playlist.preloadCoversForTracks(t.slice(s, e + 1));
+        }
+    } else {
+      this._setupMediaSession(file);
+      AQUE.Playlist.render();
+      this._saveDebounced();
+    }
   },
 
   getUpNextTracks(count = 5) {
@@ -226,9 +256,9 @@ AQUE.Player = {
     if (parsed.title) title = parsed.title;
     if (parsed.artist) artist = parsed.artist;
 
-    // Check cache first
     const filePath = file.path;
     if (AQUE.API.isElectron && filePath) {
+      // ── Check memory cache first ──
       const cached = this._trackMetaCache.get(filePath);
       if (cached && cached.tags) {
         const tags = cached.tags;
@@ -251,6 +281,7 @@ AQUE.Player = {
         if (cached.cover) this._setAlbumCover(cached.cover);
         else this._setAlbumCover(null);
 
+        // 缓存命中时仍检查外挂 LRC（文件可能后添加）
         if (AQUE.State.currentLyrics.length === 0) {
           const extLrc = await AQUE.API.readLrc(filePath);
           if (loadToken !== this._loadCounter) return;
@@ -279,18 +310,20 @@ AQUE.Player = {
         }
 
         AQUE.Lyrics.render();
-
-        if (AQUE.State.autoOnlineLyrics && AQUE.State.currentLyrics.length === 0 && AQUE.API.isElectron && filePath) {
-          AQUE.Lyrics.searchOnline(artist || '', title || AQUE.Utils.stripExtension(file.name), loadToken);
-        }
         return;
       }
-    }
 
-    if (AQUE.API.isElectron && filePath) {
-      const tags = await AQUE.API.readTags(file.path);
+      // ── Cache miss: single readAllMetadata IPC (tags + cover + lrc in one call) ──
+      const meta = await AQUE.API.readAllMetadata(filePath);
       if (loadToken !== this._loadCounter) return;
-      if (tags) {
+
+      if (meta) {
+        const tags = {
+          title: meta.title || '', artist: meta.artist || '',
+          album: meta.album || '', duration: meta.duration || 0,
+          bitrate: meta.bitrate || null, sampleRate: meta.sampleRate || null,
+          hasLyrics: meta.hasLyrics || false, lyrics: meta.lyrics || null,
+        };
         if (tags.duration > 0) AQUE.State.currentDuration = tags.duration;
         if (tags.title) title = tags.title;
         if (tags.artist) artist = tags.artist;
@@ -298,6 +331,7 @@ AQUE.Player = {
           lrcText = tags.lyrics;
           AQUE.State.currentLyrics = AQUE.Utils.parseLRC(lrcText);
         }
+
         const formatEl = document.getElementById('track-format');
         const qualityEl = document.getElementById('track-quality');
         if (formatEl) formatEl.textContent = (file.name.split('.').pop() || 'LOCAL').toUpperCase();
@@ -306,40 +340,39 @@ AQUE.Player = {
           const bitrate = tags.bitrate ? Math.round(tags.bitrate / 1000) + ' kbps' : '';
           qualityEl.textContent = [sampleRate, bitrate].filter(Boolean).join(' · ') || '本地音频';
         }
-      }
 
-      const cover = await AQUE.API.readCover(file.path);
-      if (loadToken !== this._loadCounter) return;
-      this._setAlbumCover(cover);
+        this._setAlbumCover(meta.cover);
 
-      // Cache the metadata for future switches
-      if (tags) {
+        // 从 readAllMetadata 返回的 lrc 中取外挂歌词(已在主进程读取)
+        if (!tags.lyrics && meta.lrc) {
+          lrcText = meta.lrc;
+          AQUE.State.currentLyrics = AQUE.Utils.parseLRC(lrcText);
+        }
+
+        // Cache in memory for fast future access
         this._trackMetaCache.set(filePath, {
-          tags: tags,
-          cover: cover,
-          timestamp: Date.now()
+          tags, cover: meta.cover, timestamp: Date.now()
         });
-        // Evict oldest entry if cache exceeds max size
         if (this._trackMetaCache.size > this._TRACK_CACHE_MAX) {
           const oldest = this._trackMetaCache.keys().next().value;
           this._trackMetaCache.delete(oldest);
         }
-      }
 
-      if (AQUE.State.currentLyrics.length === 0) {
-        const extLrc = await AQUE.API.readLrc(file.path);
-        if (loadToken !== this._loadCounter) return;
-        if (extLrc) {
-          lrcText = extLrc;
-          AQUE.State.currentLyrics = AQUE.Utils.parseLRC(lrcText);
+        // 仍无歌词时尝试在线搜索或外挂 LRC
+        if (AQUE.State.currentLyrics.length === 0) {
+          const extLrc = await AQUE.API.readLrc(filePath);
+          if (loadToken !== this._loadCounter) return;
+          if (extLrc) {
+            lrcText = extLrc;
+            AQUE.State.currentLyrics = AQUE.Utils.parseLRC(lrcText);
+          }
         }
       }
     }
-    
+
     if (loadToken !== this._loadCounter) return;
     this.setTrackInfo(title, artist);
 
-    // 标签读取完成后更新 Media Session 元数据（覆盖初始文件名）
     if (navigator.mediaSession) {
       navigator.mediaSession.metadata = new MediaMetadata({
         title: title || AQUE.Utils.stripExtension(file.name),
@@ -356,10 +389,6 @@ AQUE.Player = {
     }
 
     AQUE.Lyrics.render();
-
-    if (AQUE.State.autoOnlineLyrics && AQUE.State.currentLyrics.length === 0 && AQUE.API.isElectron && file.path) {
-      AQUE.Lyrics.searchOnline(artist || '', title || AQUE.Utils.stripExtension(file.name), loadToken);
-    }
   },
 
   _setupMediaSession(file) {
@@ -380,7 +409,7 @@ AQUE.Player = {
     navigator.mediaSession.setActionHandler('previoustrack', () => this.prev());
     navigator.mediaSession.setActionHandler('nexttrack', () => this.next());
     navigator.mediaSession.setActionHandler('seekto', (details) => {
-      if (AQUE.API.isElectron && details.seekTime) AQUE.API.audioSeek(details.seekTime);
+      if (AQUE.API.isElectron && details.seekTime != null) AQUE.API.audioSeek(details.seekTime);
     });
 
     if (AQUE.API.isElectron && file.path) {
@@ -468,11 +497,17 @@ AQUE.Player = {
 
   async handleStateEvent(event) {
     if (event === 'completed') {
-      if (AQUE.State.playMode === 1) {
-        await AQUE.API.audioSeek(0);
-        AQUE.API.audioPlay();
-      } else {
-        this.next();
+      if (this._handlingCompletion) return;
+      this._handlingCompletion = true;
+      try {
+        if (AQUE.State.playMode === 1) {
+          await AQUE.API.audioSeek(0);
+          await AQUE.API.audioPlay();
+        } else {
+          await this.next();
+        }
+      } finally {
+        this._handlingCompletion = false;
       }
     }
   },

@@ -49,29 +49,36 @@ class AudioService {
       const pos = this._engine.position;
       const len = this._engine.length;
       const state = this._engine.state;
-      this._lastState = state;
 
-      if (state === 'stopped') {
-        if (!this._trackingComplete && !this._manualStopped) {
-          this._trackingComplete = true;
-          for (const cb of this._stateCallbacks) cb('completed');
+      // 状态变化时处理
+      if (state !== this._lastState) {
+        const prevState = this._lastState;
+        this._lastState = state;
+
+        if (state === 'stopped') {
+          // 自然播放完成（非手动停止）
+          if (!this._trackingComplete && !this._manualStopped) {
+            this._trackingComplete = true;
+            for (const cb of this._stateCallbacks) cb('completed');
+          }
+        } else if (state === 'playing') {
+          this._trackingComplete = false;
+          this._manualStopped = false;
+        } else if (state === 'paused') {
+          this._trackingComplete = false;
         }
-        return;
+
+        // 状态变化时发送一次位置更新（通知渲染层更新UI）
+        for (const cb of this._positionCallbacks) {
+          cb({ position: pos, length: len, state });
+        }
       }
 
-      if (state === 'paused') {
-        this._trackingComplete = false;
-        this._manualStopped = false;
-        return;
-      }
-
+      // 播放中持续发送位置更新
       if (state === 'playing') {
-        this._trackingComplete = false;
-        this._manualStopped = false;
-      }
-
-      for (const cb of this._positionCallbacks) {
-        cb({ position: pos, length: len, state });
+        for (const cb of this._positionCallbacks) {
+          cb({ position: pos, length: len, state });
+        }
       }
     }, 100);
 
@@ -140,6 +147,7 @@ class AudioService {
       this._engine.loadFile(filePath);
       this._engine.play();
       this._trackingComplete = false;
+      this._manualStopped = false;
       return true;
     } catch (err) {
       console.error('loadAndPlay error:', err);
@@ -221,14 +229,6 @@ class AudioService {
 
   isLoaded() {
     return this._engine && this._engine.isLoaded;
-  }
-
-  setWASAPIExclusive(enabled) {
-    if (this._engine) this._engine.setWASAPIExclusive(enabled);
-  }
-
-  getWASAPIExclusive() {
-    return this._engine ? this._engine.wasapiExclusive : false;
   }
 
   getFFTData() {
